@@ -1,0 +1,137 @@
+---
+- name: k3s on multipass installer
+  hosts: localhost
+  connection: local
+  vars:
+    pkgs:
+      default:
+        - tree
+      apt:
+        - multipass
+      homebrew:
+        - helm
+        - ansible
+        - kubectl
+    controlname: controlplane
+    controlparams: "--cpus 2 --mem 2048M --disk 5G"
+    worker1name: worker1
+    worker2name: worker2
+    workerparams: "--cpus 2 --mem 2048M --disk 5G"
+  tasks:
+    - name: chk family
+      debug:
+        var: ansible_pkg_mgr
+    - name: Install multipass cask
+      community.general.homebrew_cask:
+        name: multipass
+        path: '/opt/homebrew/bin' # set path for apple silicon brew
+        state: present
+    - name: Install other dependencies
+      when: ansible_pkg_mgr == 'homebrew'
+      homebrew:
+        name: "{{ item }}"
+        path: '/opt/homebrew/bin' # set path for apple silicon brew
+        state: present
+      loop: "{{ pkgs[ansible_pkg_mgr] | default(pkgs['default']) }}"
+
+    # Control plane preparation
+    - name: Delete existing public and private keys
+      file:
+        path: "{{ item }}"
+        state: absent
+      with_items:
+        - user_key
+        - user_key.pub
+    - name: Create kubeadmin key-pair
+      shell: ssh-keygen -C kubeadmin -N "" -f user_key
+    - name: Delete existing cloud-init file
+      file:
+        path: control-init.yaml
+        state: absent
+    - name: Create cloud-init file for controlplane
+      template:
+        src: cloud-init-template.j2
+        dest: control-init.yaml
+      vars:
+        cmd: sh -
+        public_key: "{{lookup('file', 'user_key.pub')}}"
+    - name: controlplane creation start
+      debug:
+        msg: "Starting creation of {{ controlname }}..."
+    - name: Delete existing controlplane
+      shell: |
+        multipass info {{ controlname }} > /dev/null 2> /dev/null
+        if [ $? -eq 0 ]; then
+          multipass delete {{ controlname }}
+          multipass purge
+        fi
+    - name: Create new controlplane
+      shell: multipass launch --name {{ controlname }} --cloud-init control-init.yaml {{ controlparams }} lts
+    - name: controlplane creation complete
+      debug:
+        msg: "Ended creation of {{ controlname }}."
+    # Worker node preparation
+    - name: Delete existing cloud-init file
+      file:
+        path: worker-init.yaml
+        state: absent
+    - shell: multipass exec controlplane sudo cat /var/lib/rancher/k3s/server/node-token
+      register: node_token             
+    - name: Create cloud-init file for workers
+      template:
+        src: cloud-init-template.j2
+        dest: worker-init.yaml
+      vars:
+        cmd: K3S_URL=https://192.168.205.4:6443 K3S_TOKEN={{ node_token.stdout }} sh -
+        public_key: "{{lookup('file', 'user_key.pub')}}"
+    - name: worker1 creation start
+      debug:
+        msg: "Starting creation of {{ worker1name }}..."
+    - name: Delete existing worker1
+      shell: |
+        multipass info {{ worker1name }} > /dev/null 2> /dev/null
+        if [ $? -eq 0 ]; then
+          multipass delete {{ worker1name }}
+          multipass purge
+        fi
+    - name: Create new worker1
+      shell: multipass launch --name {{ worker1name }} --cloud-init worker-init.yaml {{ workerparams }} lts
+    - name: worker1 creation complete
+      debug:
+        msg: "Ended creation of {{ worker1name }}."
+    - name: Create kube directory if needed
+      file:
+        path: ~/.kube
+        state: directory
+        mode: 0755
+    - name: place kube config for access
+      shell: multipass exec controlplane sudo cat /etc/rancher/k3s/k3s.yaml >> ~/.kube/config
+    - name: Replace IP in config
+      ansible.builtin.replace:
+        path: ~/.kube/config
+        after: 'server: https://'
+        before: ':6443'
+        # regexp: '^(.+)$'
+        replace: '192.168.205.14'
+  #  - name: preparing first worker
+  #     shell: sleep 10
+  #     async: 10
+  #     poll: 0
+  #     register: sleeper2
+  #   - name: sleep 10 seconds again
+  #     shell: sleep 10
+  #     async: 10
+  #     poll: 0
+  #     register: sleeper3
+  #   - name: wait for deletion 
+  #     async_status: jid="{{ item }}"
+  #     register: job_result
+  #     until: job_result.finished
+  #     retries: 10
+  #     with_items:
+  #       - "{{ sleeper1.ansible_job_id }}"
+  #       - "{{ sleeper2.ansible_job_id }}"
+  #       - "{{ sleeper3.ansible_job_id }}"
+  #   - name: next task
+  #     debug:
+  #       msg: "ready"

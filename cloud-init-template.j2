@@ -1,0 +1,10 @@
+users:
+  - default
+  - name: kubeadmin
+    sudo:  ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - {{ public_key }}
+package_update: true
+package_upgrade: true
+runcmd:
+ - [ sh, -xc, "curl -sfL https://get.k3s.io | {{ cmd }}" ]
