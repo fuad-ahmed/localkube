@@ -18,9 +18,23 @@
     worker2name: worker2
     workerparams: "--cpus 2 --mem 2048M --disk 5G"
   tasks:
-    - name: chk family
-      debug:
-        var: ansible_pkg_mgr
+    # - name: chk family
+    #   debug:
+    #     var: ansible_pkg_mgr
+    - name: Check if Homebrew is installed
+      stat:
+        path: /usr/local/bin/brew
+      register: ib
+    # - name: Check if Homebrew is installed
+    #   debug:
+    #     var: not ib.stat.exists
+    - name: Check if Homebrew is installed
+      stat:
+        path: /opt/homebrew/bin
+      register: ab
+    - name: Install Homebrew
+      script: install-homebrew.sh
+      when: (ib.stat.exists == false)  or (not ab.stat.exists == false)
     - name: Install multipass cask
       community.general.homebrew_cask:
         name: multipass
@@ -105,14 +119,17 @@
         state: directory
         mode: 0755
     - name: place kube config for access
-      shell: multipass exec controlplane sudo cat /etc/rancher/k3s/k3s.yaml >> ~/.kube/config
+      shell: multipass exec controlplane sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
+    - name: get controlplane IP
+      shell: multipass exec controlplane -- hostname -I|awk '{print $1}'
+      register: controlnode_ip      
     - name: Replace IP in config
       ansible.builtin.replace:
         path: ~/.kube/config
         after: 'server: https://'
         before: ':6443'
-        # regexp: '^(.+)$'
-        replace: '192.168.205.14'
+        regexp: '^(.+)$'
+        replace: "{{ controlnode_ip.stdout }}"
   #  - name: preparing first worker
   #     shell: sleep 10
   #     async: 10
