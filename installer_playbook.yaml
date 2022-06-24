@@ -21,20 +21,20 @@
     # - name: chk family
     #   debug:
     #     var: ansible_pkg_mgr
-    - name: Check if Homebrew is installed
+    - name: Check if Homebrew is installed on intel
       stat:
         path: /usr/local/bin/brew
       register: ib
     # - name: Check if Homebrew is installed
     #   debug:
     #     var: not ib.stat.exists
-    - name: Check if Homebrew is installed
+    - name: Check if Homebrew is installed on apple silicon
       stat:
         path: /opt/homebrew/bin
       register: ab
     - name: Install Homebrew
       script: install-homebrew.sh
-      when: (ib.stat.exists == false)  or (not ab.stat.exists == false)
+      when: (ib.stat.exists == false) and (not ab.stat.exists == false)
     - name: Install multipass cask
       community.general.homebrew_cask:
         name: multipass
