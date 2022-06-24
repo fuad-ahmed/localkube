@@ -80,7 +80,19 @@
           multipass purge
         fi
     - name: Create new controlplane
-      shell: multipass launch --name {{ controlname }} --cloud-init control-init.yaml {{ controlparams }} lts
+      shell: multipass launch --name {{ controlname }} --cloud-init control-init.yaml {{ controlparams }} lts      
+    - name: setup k3s
+      shell: multipass exec -vvv controlplane -- /bin/bash -c 'curl -sfL https://get.k3s.io | sh -'   
+    #   async: 1000
+    #   poll: 0
+    #   register: control_create
+    # - name: 'check controlplane creation status'
+    #   async_status:
+    #     jid: "{{ control_create.ansible_job_id }}"
+    #   register: job_result
+    #   until: job_result.finished
+    #   retries: 30
+    #   delay: 10
     - name: controlplane creation complete
       debug:
         msg: "Ended creation of {{ controlname }}."
@@ -90,13 +102,17 @@
         path: worker-init.yaml
         state: absent
     - shell: multipass exec controlplane sudo cat /var/lib/rancher/k3s/server/node-token
-      register: node_token             
+      register: node_token
+    - name: Get controlplane IP
+      shell: |
+        multipass exec controlplane -- hostname -I|awk '{print $1}'
+      register: cip             
     - name: Create cloud-init file for workers
       template:
         src: cloud-init-template.j2
         dest: worker-init.yaml
       vars:
-        cmd: K3S_URL=https://192.168.205.4:6443 K3S_TOKEN={{ node_token.stdout }} sh -
+        cmd: K3S_URL=https://{{ cip.stdout }}:6443 K3S_TOKEN={{ node_token.stdout }} sh -
         public_key: "{{lookup('file', 'user_key.pub')}}"
     - name: worker1 creation start
       debug:
@@ -110,6 +126,8 @@
         fi
     - name: Create new worker1
       shell: multipass launch --name {{ worker1name }} --cloud-init worker-init.yaml {{ workerparams }} lts
+    - name: join k3s cluster
+      shell: multipass exec -vvv worker1 -- /bin/bash -c 'curl -sfL https://get.k3s.io | K3S_URL=https://{{ cip.stdout }}:6443 K3S_TOKEN={{ node_token.stdout }} sh -' 
     - name: worker1 creation complete
       debug:
         msg: "Ended creation of {{ worker1name }}."

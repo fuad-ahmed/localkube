@@ -6,5 +6,5 @@ users:
       - {{ public_key }}
 package_update: true
 package_upgrade: true
-runcmd:
- - [ sh, -xc, "curl -sfL https://get.k3s.io | {{ cmd }}" ]
+# runcmd:
+# - [ sh, -x, "curl -sfL https://get.k3s.io | {{ cmd }}" ]
